@@ -68,6 +68,46 @@ local function classifyPill(subType)
 end
 
 ---------------------------------------------------------------------
+-- Player & Synergy Helpers
+---------------------------------------------------------------------
+local function anyPlayerHasCollectible(id)
+    local game = Game()
+    for i = 0, game:GetNumPlayers() - 1 do
+        local player = game:GetPlayer(i)
+        if player and player:HasCollectible(id, false) then
+            return true
+        end
+    end
+    return false
+end
+
+local function anyPlayerHasTrinket(id)
+    local game = Game()
+    for i = 0, game:GetNumPlayers() - 1 do
+        local player = game:GetPlayer(i)
+        if player and player:HasTrinket(id, false) then
+            return true
+        end
+    end
+    return false
+end
+
+local function hasTarotCloth(player)
+    return (player and player:HasCollectible(CollectibleType.COLLECTIBLE_TAROT_CLOTH, false))
+        or anyPlayerHasCollectible(CollectibleType.COLLECTIBLE_TAROT_CLOTH)
+end
+
+local function hasBoosterPack(player)
+    return (player and player:HasCollectible(CollectibleType.COLLECTIBLE_BOOSTER_PACK, false))
+        or anyPlayerHasCollectible(CollectibleType.COLLECTIBLE_BOOSTER_PACK)
+end
+
+local function hasEchoChamber(player)
+    return (player and player:HasCollectible(CollectibleType.COLLECTIBLE_ECHO_CHAMBER, false))
+        or anyPlayerHasCollectible(CollectibleType.COLLECTIBLE_ECHO_CHAMBER)
+end
+
+---------------------------------------------------------------------
 -- Room scan
 ---------------------------------------------------------------------
 local function collectEligible()
@@ -470,36 +510,6 @@ end
 -- DEVIL / ANGEL POOL WEIGHTS
 ---------------------------------------------------------------------
 
-local function anyPlayerHasCollectible(id)
-    local game = Game()
-
-    for i = 0, game:GetNumPlayers() - 1 do
-        local player = game:GetPlayer(i)
-
-        if player and player:HasCollectible(id, false) then
-            return true
-        end
-    end
-
-    return false
-end
-
-
-local function anyPlayerHasTrinket(id)
-    local game = Game()
-
-    for i = 0, game:GetNumPlayers() - 1 do
-        local player = game:GetPlayer(i)
-
-        if player and player:HasTrinket(id, false) then
-            return true
-        end
-    end
-
-    return false
-end
-
-
 local function getDevilAngelShares()
     local game = Game()
     local level = game:GetLevel()
@@ -597,38 +607,41 @@ local function getRewardLines(hand)
         return "NO VALID HAND", "Activation will do nothing"
     end
 
+    local cloth = hasTarotCloth(nil)
+
     if hand.name == "PAIR" then
-        return "PAIR", "Reward: +1.0 Tears (permanent)"
+        return "PAIR", cloth and "Reward: +2.0 Tears (Tarot Cloth)" or "Reward: +1.0 Tears (permanent)"
 
     elseif hand.name == "TWO PAIR" then
-        return "TWO PAIR", "Reward: +1.0 Damage (permanent)"
+        return "TWO PAIR", cloth and "Reward: +2.0 Damage (Tarot Cloth)" or "Reward: +1.0 Damage (permanent)"
 
     elseif hand.name == "THREE OF A KIND" then
-        return "THREE OF A KIND", "Reward: +1.0 Luck (permanent)"
+        return "THREE OF A KIND", cloth and "Reward: +2.0 Luck (Tarot Cloth)" or "Reward: +1.0 Luck (permanent)"
 
     elseif hand.name == "FLUSH" then
-        return "FLUSH", "Reward: Breakfast collectible pedestal"
+        return "FLUSH", cloth and "Reward: Treasure Room item (Tarot Cloth)" or "Reward: Breakfast collectible pedestal"
 
     elseif hand.name == "FULL HOUSE" then
-        return "FULL HOUSE", "Reward: duplicate all other eligible pickups"
+        return "FULL HOUSE", cloth and "Reward: 2x duplicate eligible pickups" or "Reward: duplicate all other eligible pickups"
 
     elseif hand.name == "FOUR OF A KIND" then
-        return "FOUR OF A KIND", "Reward: choose 1 of 3 Treasure Room items"
+        return "FOUR OF A KIND", cloth and "Reward: choose 1 of 4 Treasure items" or "Reward: choose 1 of 3 Treasure Room items"
 
     elseif hand.name == "FIVE OF A KIND" then
-        return "FIVE OF A KIND", "Reward: choose 1 of 2 Secret Room items"
+        return "FIVE OF A KIND", cloth and "Reward: choose 1 of 3 Secret items" or "Reward: choose 1 of 2 Secret Room items"
 
     elseif hand.name == "ARCANA RUN" then
         local devil, angel = getDevilAngelShares()
+        local count = cloth and 3 or 2
 
         return "ARCANA RUN",
-            "2 free Devil/Angel items | Devil " ..
+            tostring(count) .. " free Devil/Angel items | Devil " ..
             tostring(math.floor(devil * 100 + 0.5)) ..
             "% / Angel " ..
             tostring(math.floor(angel * 100 + 0.5)) .. "%"
 
     elseif hand.name == "ROYAL FLUSH" then
-        return "ROYAL FLUSH", "Reward: choose 1 Angel & 1 Devil item"
+        return "ROYAL FLUSH", cloth and "Reward: choose 1 of 3 Angel & 1 of 3 Devil" or "Reward: choose 1 Angel & 1 Devil item"
 
     else
         return hand.name, "Reward not implemented"
@@ -685,15 +698,17 @@ mod:AddCallback(ModCallbacks.MC_POST_RENDER, mod.OnPostRender)
 
 
 ---------------------------------------------------------------------
--- PERMANENT STAT BONUSES
+-- PERSISTENT STATE & STAT BONUSES
 ---------------------------------------------------------------------
 
 mod.runBonuses = {}
+mod.lastPlayedHandName = nil
+mod.movingBoxExtra = {}
+mod.myosotisCarryover = {}
 
 local function getPlayerKey(player)
     return tostring(player.ControllerIndex)
 end
-
 
 local function getPlayerBonuses(player)
     local key = getPlayerKey(player)
@@ -709,20 +724,34 @@ local function getPlayerBonuses(player)
     return mod.runBonuses[key]
 end
 
-
-local function saveBonuses()
-    mod:SaveData(json.encode(mod.runBonuses))
+local function saveModState()
+    local payload = {
+        bonuses = mod.runBonuses,
+        lastPlayedHandName = mod.lastPlayedHandName,
+        movingBoxExtra = mod.movingBoxExtra,
+        myosotisCarryover = mod.myosotisCarryover,
+    }
+    mod:SaveData(json.encode(payload))
 end
-
 
 function mod:OnGameStarted(isContinued)
     mod.runBonuses = {}
+    mod.lastPlayedHandName = nil
+    mod.movingBoxExtra = {}
+    mod.myosotisCarryover = {}
 
     if isContinued and mod:HasData() then
         local success, saved = pcall(json.decode, mod:LoadData())
 
         if success and type(saved) == "table" then
-            mod.runBonuses = saved
+            if saved.bonuses then
+                mod.runBonuses = saved.bonuses
+                mod.lastPlayedHandName = saved.lastPlayedHandName
+                mod.movingBoxExtra = saved.movingBoxExtra or {}
+                mod.myosotisCarryover = saved.myosotisCarryover or {}
+            else
+                mod.runBonuses = saved
+            end
         end
     end
 
@@ -742,18 +771,16 @@ function mod:OnGameStarted(isContinued)
         end
     end
 
-    saveBonuses()
+    saveModState()
 end
 
 mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, mod.OnGameStarted)
 
-
 function mod:OnPreGameExit()
-    saveBonuses()
+    saveModState()
 end
 
 mod:AddCallback(ModCallbacks.MC_PRE_GAME_EXIT, mod.OnPreGameExit)
-
 
 function mod:OnEvaluateCache(player, cacheFlag)
     local bonus = getPlayerBonuses(player)
@@ -774,7 +801,6 @@ end
 
 mod:AddCallback(ModCallbacks.MC_EVALUATE_CACHE, mod.OnEvaluateCache)
 
-
 local function addPermanentBonus(player, stat, amount)
     local bonus = getPlayerBonuses(player)
 
@@ -787,7 +813,7 @@ local function addPermanentBonus(player, stat, amount)
     )
 
     player:EvaluateItems()
-    saveBonuses()
+    saveModState()
 end
 
 
@@ -863,50 +889,46 @@ local function spawnPoolItems(player, poolType, count, rng, optionsIndex)
     return true
 end
 
-local function spawnBreakfast(player)
-    return spawnCollectible(
-        player,
-        CollectibleType.COLLECTIBLE_BREAKFAST,
-        Game():GetRoom():GetCenterPos(),
-        nil
-    ) ~= nil
-end
-
-local function duplicateRemainingEligible(hand, player)
+local function duplicateRemainingEligible(hand, player, copiesPerPickup)
     local selected = {}
 
-    for _, entry in ipairs(hand.selected) do
-        selected[entry.pickup] = true
+    if hand and hand.selected then
+        for _, entry in ipairs(hand.selected) do
+            selected[entry.pickup] = true
+        end
     end
 
     local entries = collectEligible()
     local room = Game():GetRoom()
     local duplicated = 0
+    local copies = copiesPerPickup or 1
 
     for _, entry in ipairs(entries) do
         local original = entry.pickup
 
         if original and original:Exists() and not selected[original] then
-            local offset = Vector(((duplicated % 5) - 2) * 24, math.floor(duplicated / 5) * 24)
-            local desiredPosition = original.Position + offset
-            local position = room:FindFreePickupSpawnPosition(
-                desiredPosition,
-                0,
-                true,
-                false
-            )
+            for _ = 1, copies do
+                local offset = Vector(((duplicated % 5) - 2) * 24, math.floor(duplicated / 5) * 24)
+                local desiredPosition = original.Position + offset
+                local position = room:FindFreePickupSpawnPosition(
+                    desiredPosition,
+                    0,
+                    true,
+                    false
+                )
 
-            local copy = Isaac.Spawn(
-                EntityType.ENTITY_PICKUP,
-                original.Variant,
-                original.SubType,
-                position,
-                Vector(0, 0),
-                player
-            )
+                local copy = Isaac.Spawn(
+                    EntityType.ENTITY_PICKUP,
+                    original.Variant,
+                    original.SubType,
+                    position,
+                    Vector(0, 0),
+                    player
+                )
 
-            if copy then
-                duplicated = duplicated + 1
+                if copy then
+                    duplicated = duplicated + 1
+                end
             end
         end
     end
@@ -914,66 +936,72 @@ local function duplicateRemainingEligible(hand, player)
     return true
 end
 
+
 ---------------------------------------------------------------------
--- REWARD HANDLERS
+-- REWARD HANDLERS (Supports Tarot Cloth & Custom Option Groups)
 ---------------------------------------------------------------------
 
-local function grantReward(hand, player, rng)
-    if hand.name == "PAIR" then
-        addPermanentBonus(player, "tears", 1)
+local function grantRewardByName(handName, handObj, player, rng, optionIndexOffset)
+    local cloth = hasTarotCloth(player)
+    local statMult = cloth and 2 or 1
+    local extraOptions = cloth and 1 or 0
+    local optOffset = optionIndexOffset or 0
+
+    if handName == "PAIR" then
+        addPermanentBonus(player, "tears", 1 * statMult)
         return true
 
-    elseif hand.name == "TWO PAIR" then
-        addPermanentBonus(player, "damage", 1)
+    elseif handName == "TWO PAIR" then
+        addPermanentBonus(player, "damage", 1 * statMult)
         return true
 
-    elseif hand.name == "THREE OF A KIND" then
-        addPermanentBonus(player, "luck", 1)
+    elseif handName == "THREE OF A KIND" then
+        addPermanentBonus(player, "luck", 1 * statMult)
         return true
 
-    elseif hand.name == "FLUSH" then
-        return spawnBreakfast(player)
+    elseif handName == "FLUSH" then
+        if cloth then
+            return spawnPoolItems(player, ItemPoolType.POOL_TREASURE, 1, rng, nil)
+        else
+            return spawnCollectible(player, CollectibleType.COLLECTIBLE_BREAKFAST, Game():GetRoom():GetCenterPos(), nil) ~= nil
+        end
 
-    elseif hand.name == "FULL HOUSE" then
-        return duplicateRemainingEligible(hand, player)
+    elseif handName == "FULL HOUSE" then
+        return duplicateRemainingEligible(handObj, player, cloth and 2 or 1)
 
-    elseif hand.name == "FOUR OF A KIND" then
+    elseif handName == "FOUR OF A KIND" then
         return spawnPoolItems(
             player,
             ItemPoolType.POOL_TREASURE,
-            3,
+            3 + extraOptions,
             rng,
-            1
+            1 + optOffset
         )
 
-    elseif hand.name == "FIVE OF A KIND" then
+    elseif handName == "FIVE OF A KIND" then
         return spawnPoolItems(
             player,
             ItemPoolType.POOL_SECRET,
-            2,
+            2 + extraOptions,
             rng,
-            2
+            2 + optOffset
         )
 
-    elseif hand.name == "ARCANA RUN" then
+    elseif handName == "ARCANA RUN" then
         local devilShare, angelShare = getDevilAngelShares()
-        local poolType
+        local poolType = (rng:RandomFloat() < angelShare)
+            and ItemPoolType.POOL_ANGEL
+            or ItemPoolType.POOL_DEVIL
 
-        if rng:RandomFloat() < angelShare then
-            poolType = ItemPoolType.POOL_ANGEL
-        else
-            poolType = ItemPoolType.POOL_DEVIL
-        end
+        return spawnPoolItems(player, poolType, 2 + extraOptions, rng, optOffset > 0 and (10 + optOffset) or nil)
 
-        return spawnPoolItems(player, poolType, 2, rng, nil)
-
-    elseif hand.name == "ROYAL FLUSH" then
+    elseif handName == "ROYAL FLUSH" then
         local angelSuccess = spawnPoolItems(
             player,
             ItemPoolType.POOL_ANGEL,
-            2,
+            2 + extraOptions,
             rng,
-            3
+            3 + optOffset
         )
 
         if not angelSuccess then
@@ -983,18 +1011,67 @@ local function grantReward(hand, player, rng)
         return spawnPoolItems(
             player,
             ItemPoolType.POOL_DEVIL,
-            2,
+            2 + extraOptions,
             rng,
-            4
+            4 + optOffset
         )
     end
 
     return false
 end
 
+
 ---------------------------------------------------------------------
--- ITEM ACTIVATION
+-- ITEM ACTIVATION (One Last Hand + Synergies)
 ---------------------------------------------------------------------
+
+local function executeHandActivation(hand, player, rng, consumedSnapshots)
+    -- 1. Grant primary hand reward
+    local success = grantRewardByName(hand.name, hand, player, rng, 0)
+    if not success then
+        return false
+    end
+
+    -- 2. Echo Chamber Synergy: replay the single previous hand's reward
+    if hasEchoChamber(player) and mod.lastPlayedHandName then
+        log("Echo Chamber synergy: replaying " .. mod.lastPlayedHandName)
+        grantRewardByName(mod.lastPlayedHandName, nil, player, rng, 0)
+    end
+
+    -- 3. D1 & Deck of Cards Synergy: 50% double activation chance each
+    local doubleProcs = 0
+    if player:HasCollectible(CollectibleType.COLLECTIBLE_D1, false) and rng:RandomFloat() < 0.50 then
+        doubleProcs = doubleProcs + 1
+        log("D1 synergy: double activation triggered!")
+    end
+    if player:HasCollectible(CollectibleType.COLLECTIBLE_DECK_OF_CARDS, false) and rng:RandomFloat() < 0.50 then
+        doubleProcs = doubleProcs + 1
+        log("Deck of Cards synergy: double activation triggered!")
+    end
+
+    -- For double activations, pass an option index offset (10) so extra pedestals form separate choice groups
+    for i = 1, doubleProcs do
+        grantRewardByName(hand.name, hand, player, rng, i * 10)
+    end
+
+    -- 4. Booster Pack Synergy: 4- or 5-pickup hands refund 1 random consumed pickup
+    if hasBoosterPack(player) and #consumedSnapshots >= 4 then
+        local chosen = consumedSnapshots[rng:RandomInt(#consumedSnapshots) + 1]
+        local room = Game():GetRoom()
+        local pos = room:FindFreePickupSpawnPosition(player.Position + Vector(0, 30), 0, true, false)
+        Isaac.Spawn(
+            EntityType.ENTITY_PICKUP,
+            chosen.variant,
+            chosen.subType,
+            pos,
+            Vector(0, 0),
+            player
+        )
+        log("Booster Pack synergy: refunded 1 pickup.")
+    end
+
+    return true
+end
 
 function mod:OnUseItem(item, rng, player, useFlags, activeSlot, varData)
     local hand = getBestHand(collectEligible())
@@ -1010,10 +1087,18 @@ function mod:OnUseItem(item, rng, player, useFlags, activeSlot, varData)
 
     log("Selected hand: " .. hand.name)
 
-    -- Grant the reward immediately
-    if not grantReward(hand, player, rng) then
-        log("Reward could not be created. Pickups left untouched.")
+    local consumedSnapshots = {}
+    for _, entry in ipairs(hand.selected) do
+        if entry.pickup and entry.pickup:Exists() then
+            table.insert(consumedSnapshots, {
+                variant = entry.pickup.Variant,
+                subType = entry.pickup.SubType,
+            })
+        end
+    end
 
+    if not executeHandActivation(hand, player, rng, consumedSnapshots) then
+        log("Reward could not be created. Pickups left untouched.")
         return {
             Discharge = false,
             Remove = false,
@@ -1021,12 +1106,14 @@ function mod:OnUseItem(item, rng, player, useFlags, activeSlot, varData)
         }
     end
 
-    -- Remove the consumed physical cards/pills immediately
     for _, entry in ipairs(hand.selected) do
         if entry.pickup and entry.pickup:Exists() then
             entry.pickup:Remove()
         end
     end
+
+    mod.lastPlayedHandName = hand.name
+    saveModState()
 
     log("Played " .. hand.name)
 
@@ -1042,3 +1129,204 @@ mod:AddCallback(
     mod.OnUseItem,
     mod.COLLECTIBLE_ONE_LAST_HAND
 )
+
+
+---------------------------------------------------------------------
+-- SYNERGY: DECK OF CARDS (Two-Way Double Activation)
+---------------------------------------------------------------------
+
+mod.isTriggeringDeckSynergy = false
+
+function mod:OnUseDeckOfCards(item, rng, player, useFlags, activeSlot, varData)
+    if mod.isTriggeringDeckSynergy then
+        return
+    end
+
+    if player and player:HasCollectible(mod.COLLECTIBLE_ONE_LAST_HAND, false) then
+        if rng:RandomFloat() < 0.50 then
+            log("One Last Hand + Deck of Cards: double Deck activation!")
+            mod.isTriggeringDeckSynergy = true
+            player:UseActiveItem(CollectibleType.COLLECTIBLE_DECK_OF_CARDS, UseFlag.USE_NOANIM | UseFlag.USE_NOANNOUNCER)
+            mod.isTriggeringDeckSynergy = false
+        end
+    end
+end
+
+mod:AddCallback(
+    ModCallbacks.MC_USE_ITEM,
+    mod.OnUseDeckOfCards,
+    CollectibleType.COLLECTIBLE_DECK_OF_CARDS
+)
+
+
+---------------------------------------------------------------------
+-- SYNERGY: D1 (Extra Exact Duplicate Chance)
+---------------------------------------------------------------------
+
+function mod:OnUseD1(item, rng, player, useFlags, activeSlot, varData)
+    if player and player:HasCollectible(mod.COLLECTIBLE_ONE_LAST_HAND, false) then
+        if rng:RandomFloat() < 0.50 then
+            local eligible = collectEligible()
+            if #eligible > 0 then
+                local chosen = eligible[rng:RandomInt(#eligible) + 1].pickup
+                if chosen and chosen:Exists() then
+                    local room = Game():GetRoom()
+                    local pos = room:FindFreePickupSpawnPosition(chosen.Position + Vector(24, 0), 0, true, false)
+                    Isaac.Spawn(
+                        EntityType.ENTITY_PICKUP,
+                        chosen.Variant,
+                        chosen.SubType,
+                        pos,
+                        Vector(0, 0),
+                        player
+                    )
+                    log("One Last Hand + D1: spawned extra exact duplicate!")
+                end
+            end
+        end
+    end
+end
+
+mod:AddCallback(
+    ModCallbacks.MC_USE_ITEM,
+    mod.OnUseD1,
+    CollectibleType.COLLECTIBLE_D1
+)
+
+
+---------------------------------------------------------------------
+-- SYNERGY: MOVING BOX (+50% Capacity: 10 -> 15 Pickups)
+---------------------------------------------------------------------
+
+function mod:OnUseMovingBox(item, rng, player, useFlags, activeSlot, varData)
+    if not player or not player:HasCollectible(mod.COLLECTIBLE_ONE_LAST_HAND, false) then
+        return
+    end
+
+    if #mod.movingBoxExtra == 0 then
+        local extraCaptured = 0
+        for _, ent in ipairs(Isaac.FindByType(EntityType.ENTITY_PICKUP, -1, -1)) do
+            local pickup = ent:ToPickup()
+            if pickup and pickup:Exists()
+                and pickup.Variant ~= PickupVariant.PICKUP_COLLECTIBLE
+                and pickup.Variant ~= PickupVariant.PICKUP_SHOPITEM
+                and pickup.Price == 0 then
+
+                table.insert(mod.movingBoxExtra, {
+                    variant = pickup.Variant,
+                    subType = pickup.SubType,
+                })
+                pickup:Remove()
+                extraCaptured = extraCaptured + 1
+
+                if extraCaptured >= 5 then
+                    break
+                end
+            end
+        end
+
+        if extraCaptured > 0 then
+            log("Moving Box synergy: stored " .. tostring(extraCaptured) .. " extra pickups (up to 15 total).")
+            saveModState()
+        end
+    else
+        local room = Game():GetRoom()
+        for i, saved in ipairs(mod.movingBoxExtra) do
+            local offset = Vector(((i % 5) - 2) * 26, 36)
+            local pos = room:FindFreePickupSpawnPosition(player.Position + offset, 0, true, false)
+            Isaac.Spawn(
+                EntityType.ENTITY_PICKUP,
+                saved.variant,
+                saved.subType,
+                pos,
+                Vector(0, 0),
+                player
+            )
+        end
+        log("Moving Box synergy: unpacked " .. tostring(#mod.movingBoxExtra) .. " extra pickups.")
+        mod.movingBoxExtra = {}
+        saveModState()
+    end
+end
+
+mod:AddCallback(
+    ModCallbacks.MC_USE_ITEM,
+    mod.OnUseMovingBox,
+    CollectibleType.COLLECTIBLE_MOVING_BOX
+)
+
+---------------------------------------------------------------------
+-- SYNERGY: MYOSOTIS (50% chance to duplicate 1-2 pickups on new floor)
+---------------------------------------------------------------------
+
+mod.pendingMyosotisCheck = false
+
+function mod:OnPostNewLevelMyosotis()
+    mod.pendingMyosotisCheck = true
+end
+
+mod:AddCallback(ModCallbacks.MC_POST_NEW_LEVEL, mod.OnPostNewLevelMyosotis)
+
+function mod:OnPostUpdateMyosotis()
+    if not mod.pendingMyosotisCheck then
+        return
+    end
+
+    mod.pendingMyosotisCheck = false
+
+    if not (anyPlayerHasCollectible(mod.COLLECTIBLE_ONE_LAST_HAND)
+        and anyPlayerHasTrinket(TrinketType.TRINKET_MYOSOTIS)) then
+        return
+    end
+
+    local game = Game()
+    local room = game:GetRoom()
+    local player = game:GetPlayer(0)
+    local rng = player:GetCollectibleRNG(mod.COLLECTIBLE_ONE_LAST_HAND)
+
+    -- Find all free pickups currently in the starting room
+    local pickups = {}
+    for _, ent in ipairs(Isaac.FindByType(EntityType.ENTITY_PICKUP, -1, -1)) do
+        local pickup = ent:ToPickup()
+        if pickup and pickup:Exists()
+            and pickup.Price == 0
+            and pickup.Variant ~= PickupVariant.PICKUP_COLLECTIBLE
+            and pickup.Variant ~= PickupVariant.PICKUP_SHOPITEM then
+            table.insert(pickups, {
+                variant = pickup.Variant,
+                subType = pickup.SubType,
+                position = pickup.Position,
+            })
+        end
+    end
+
+    if #pickups == 0 then
+        log("Myosotis synergy: no pickups found in starting room.")
+        return
+    end
+
+    if rng:RandomFloat() < 0.50 then
+        local dupeCount = math.min(#pickups, rng:RandomInt(2) + 1) -- 1 or 2 pickups
+
+        for i = 1, dupeCount do
+            local idx = rng:RandomInt(#pickups) + 1
+            local chosen = table.remove(pickups, idx)
+            local pos = room:FindFreePickupSpawnPosition(chosen.position + Vector(24, 0), 0, true, false)
+
+            Isaac.Spawn(
+                EntityType.ENTITY_PICKUP,
+                chosen.variant,
+                chosen.subType,
+                pos,
+                Vector(0, 0),
+                player
+            )
+        end
+
+        log("Myosotis synergy: duplicated " .. tostring(dupeCount) .. " pickup(s) in starting room.")
+    else
+        log("Myosotis synergy: 50% roll did not trigger.")
+    end
+end
+
+mod:AddCallback(ModCallbacks.MC_POST_UPDATE, mod.OnPostUpdateMyosotis)
