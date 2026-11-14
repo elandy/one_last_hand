@@ -1,0 +1,10 @@
+<items gfxroot="gfx/items/" version="1">
+    <active
+        name="One Last Hand"
+        description="Play your hand"
+        gfx="one_last_hand.png"
+        maxcharges="0"
+        quality="3"
+        tags="offensive"
+    />
+</items>
