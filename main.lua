@@ -32,6 +32,16 @@ local function classifyCard(id)
         return { family = "TAROT", identity = "TAROT:" .. id, units = 1, arcana = id }
     end
 
+    if id >= 23 and id <= 26 then
+        -- Twos (Clubs, Diamonds, Spades, Hearts)
+        return { family = "PLAYING", identity = "CARD:2", units = 1 }
+    end
+
+    if id >= 27 and id <= 30 then
+        -- Aces (Clubs, Diamonds, Spades, Hearts)
+        return { family = "PLAYING", identity = "CARD:ACE", units = 1 }
+    end
+
     if id >= 56 and id <= 77 then
         local base = id - 55 -- reversed counts as its upright counterpart
         return { family = "TAROT", identity = "TAROT:" .. base, units = 1, arcana = base }
@@ -372,7 +382,7 @@ local function evaluateAssigned(entries)
         end
     end
 
-    for _, family in ipairs({"TAROT", "PILL", "RUNE", "SOUL"}) do
+    for _, family in ipairs({"TAROT", "PILL", "RUNE", "SOUL", "PLAYING"}) do
         local subset = findExactSubset(families[family] or {}, 5)
 
         if subset then
@@ -474,13 +484,17 @@ local function getBestHand(entries)
         addAssignment(entry.family, entry.identity, entry.arcana)
     end
 
-    for _, family in ipairs({"TAROT", "PILL", "RUNE", "SOUL"}) do
+    for _, family in ipairs({"TAROT", "PILL", "RUNE", "SOUL", "PLAYING"}) do
         addAssignment(family, "WILD_FLUSH:" .. family, nil)
     end
 
     for id = 1, 22 do
         addAssignment("TAROT", "TAROT:" .. id, id)
     end
+
+    -- Allow wildcard to represent playing card ranks
+    addAssignment("PLAYING", "CARD:2", nil)
+    addAssignment("PLAYING", "CARD:ACE", nil)
 
     for _, assignment in ipairs(assignments) do
         local assigned = {}
@@ -604,7 +618,7 @@ end
 
 local function getRewardLines(hand)
     if not hand then
-        return Null, Null
+        return nil, nil
     end
 
     local cloth = hasTarotCloth(nil)
@@ -692,7 +706,6 @@ function mod:OnPostRender()
 
         renderCenteredText(line1, y)
         renderCenteredText(line2, y + 10)
-        
     end
 end
 
@@ -808,7 +821,6 @@ function mod:OnEvaluateCache(player, cacheFlag)
     elseif cacheFlag == CacheFlag.CACHE_FIREDELAY then
         if bonus.tears > 0 then
             local currentTears = toTearsPerSecond(player.MaxFireDelay)
-            -- Standard tears ups respect the normal soft cap of 5.0 tears/sec
             local targetTears = math.min(5.0, currentTears + bonus.tears)
             if targetTears > currentTears then
                 player.MaxFireDelay = toMaxFireDelay(targetTears)
@@ -1044,19 +1056,16 @@ end
 ---------------------------------------------------------------------
 
 local function executeHandActivation(hand, player, rng, consumedSnapshots)
-    -- 1. Grant primary hand reward
     local success = grantRewardByName(hand.name, hand, player, rng, 0)
     if not success then
         return false
     end
 
-    -- 2. Echo Chamber Synergy: replay the single previous hand's reward
     if hasEchoChamber(player) and mod.lastPlayedHandName then
         log("Echo Chamber synergy: replaying " .. mod.lastPlayedHandName)
         grantRewardByName(mod.lastPlayedHandName, nil, player, rng, 0)
     end
 
-    -- 3. D1 & Deck of Cards Synergy: 50% double activation chance each
     local doubleProcs = 0
     if player:HasCollectible(CollectibleType.COLLECTIBLE_D1, false) and rng:RandomFloat() < 0.50 then
         doubleProcs = doubleProcs + 1
@@ -1067,12 +1076,10 @@ local function executeHandActivation(hand, player, rng, consumedSnapshots)
         log("Deck of Cards synergy: double activation triggered!")
     end
 
-    -- For double activations, pass an option index offset (10) so extra pedestals form separate choice groups
     for i = 1, doubleProcs do
         grantRewardByName(hand.name, hand, player, rng, i * 10)
     end
 
-    -- 4. Booster Pack Synergy: 4- or 5-pickup hands refund 1 random consumed pickup
     if hasBoosterPack(player) and #consumedSnapshots >= 4 then
         local chosen = consumedSnapshots[rng:RandomInt(#consumedSnapshots) + 1]
         local room = Game():GetRoom()
@@ -1273,11 +1280,10 @@ mod:AddCallback(
     CollectibleType.COLLECTIBLE_MOVING_BOX
 )
 
+
 ---------------------------------------------------------------------
 -- SYNERGY: MYOSOTIS (50% chance to duplicate 1-2 pickups on new floor)
 ---------------------------------------------------------------------
-
-mod.pendingMyosotisCheck = false
 
 function mod:OnPostNewLevelMyosotis()
     mod.pendingMyosotisCheck = true
@@ -1302,7 +1308,6 @@ function mod:OnPostUpdateMyosotis()
     local player = game:GetPlayer(0)
     local rng = player:GetCollectibleRNG(mod.COLLECTIBLE_ONE_LAST_HAND)
 
-    -- Find all free pickups currently in the starting room
     local pickups = {}
     for _, ent in ipairs(Isaac.FindByType(EntityType.ENTITY_PICKUP, -1, -1)) do
         local pickup = ent:ToPickup()
@@ -1323,7 +1328,7 @@ function mod:OnPostUpdateMyosotis()
     end
 
     if rng:RandomFloat() < 0.50 then
-        local dupeCount = math.min(#pickups, rng:RandomInt(2) + 1) -- 1 or 2 pickups
+        local dupeCount = math.min(#pickups, rng:RandomInt(2) + 1)
 
         for i = 1, dupeCount do
             local idx = rng:RandomInt(#pickups) + 1
