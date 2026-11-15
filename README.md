@@ -16,7 +16,7 @@ This item belongs to the Treasure Room and Shop pools.
 ### Item & Trinket Synergies
 
 * **Tarot Cloth (Passive Item)**
-  * **Stats:** Doubles permanent stat gains (**+2.0** instead of +1.0).
+  * **Stats:** Doubles permanent stat gains.
   * **Flush:** Upgrades the reward from Breakfast to a guaranteed Treasure Room item.
   * **Full House:** Spawns **2x duplicate copies** of every other eligible pickup.
   * **Choices:** Adds **+1 extra pedestal option** to every choice reward group (4 Treasure options, 3 Secret options, or 3-way Angel/Devil pools).
