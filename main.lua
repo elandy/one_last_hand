@@ -604,13 +604,13 @@ end
 
 local function getRewardLines(hand)
     if not hand then
-        return "NO VALID HAND", "Activation will do nothing"
+        return Null, Null
     end
 
     local cloth = hasTarotCloth(nil)
 
     if hand.name == "PAIR" then
-        return "PAIR", cloth and "Reward: +2.0 Tears (Tarot Cloth)" or "Reward: +1.0 Tears (permanent)"
+        return "PAIR", cloth and "Reward: +1.6 Tears (Tarot Cloth)" or "Reward: +0.8 Tears (permanent)"
 
     elseif hand.name == "TWO PAIR" then
         return "TWO PAIR", cloth and "Reward: +2.0 Damage (Tarot Cloth)" or "Reward: +1.0 Damage (permanent)"
@@ -687,11 +687,13 @@ function mod:OnPostRender()
 
     local hand = getBestHand(collectEligible())
     local line1, line2 = getRewardLines(hand)
+    if line1 and line2 then
+        local y = Isaac.GetScreenHeight() - 42
 
-    local y = Isaac.GetScreenHeight() - 42
-
-    renderCenteredText(line1, y)
-    renderCenteredText(line2, y + 10)
+        renderCenteredText(line1, y)
+        renderCenteredText(line2, y + 10)
+        
+    end
 end
 
 mod:AddCallback(ModCallbacks.MC_POST_RENDER, mod.OnPostRender)
@@ -782,6 +784,18 @@ end
 
 mod:AddCallback(ModCallbacks.MC_PRE_GAME_EXIT, mod.OnPreGameExit)
 
+---------------------------------------------------------------------
+-- CACHE EVALUATION (Using Isaac Blueprints Tears-Up & Soft Cap formula)
+---------------------------------------------------------------------
+
+local function toTearsPerSecond(maxFireDelay)
+    return 30 / (maxFireDelay + 1)
+end
+
+local function toMaxFireDelay(tearsPerSecond)
+    return (30 / tearsPerSecond) - 1
+end
+
 function mod:OnEvaluateCache(player, cacheFlag)
     local bonus = getPlayerBonuses(player)
 
@@ -792,10 +806,14 @@ function mod:OnEvaluateCache(player, cacheFlag)
         player.Luck = player.Luck + bonus.luck
 
     elseif cacheFlag == CacheFlag.CACHE_FIREDELAY then
-        local currentTears = 30 / (player.MaxFireDelay + 1)
-        local newTears = math.min(currentTears + bonus.tears, 120)
-
-        player.MaxFireDelay = 30 / newTears - 1
+        if bonus.tears > 0 then
+            local currentTears = toTearsPerSecond(player.MaxFireDelay)
+            -- Standard tears ups respect the normal soft cap of 5.0 tears/sec
+            local targetTears = math.min(5.0, currentTears + bonus.tears)
+            if targetTears > currentTears then
+                player.MaxFireDelay = toMaxFireDelay(targetTears)
+            end
+        end
     end
 end
 
@@ -938,7 +956,7 @@ end
 
 
 ---------------------------------------------------------------------
--- REWARD HANDLERS (Supports Tarot Cloth & Custom Option Groups)
+-- REWARD HANDLERS
 ---------------------------------------------------------------------
 
 local function grantRewardByName(handName, handObj, player, rng, optionIndexOffset)
@@ -948,7 +966,7 @@ local function grantRewardByName(handName, handObj, player, rng, optionIndexOffs
     local optOffset = optionIndexOffset or 0
 
     if handName == "PAIR" then
-        addPermanentBonus(player, "tears", 1 * statMult)
+        addPermanentBonus(player, "tears", 0.8 * statMult)
         return true
 
     elseif handName == "TWO PAIR" then
@@ -1022,7 +1040,7 @@ end
 
 
 ---------------------------------------------------------------------
--- ITEM ACTIVATION (One Last Hand + Synergies)
+-- ITEM ACTIVATION
 ---------------------------------------------------------------------
 
 local function executeHandActivation(hand, player, rng, consumedSnapshots)
@@ -1301,7 +1319,6 @@ function mod:OnPostUpdateMyosotis()
     end
 
     if #pickups == 0 then
-        log("Myosotis synergy: no pickups found in starting room.")
         return
     end
 
@@ -1324,8 +1341,6 @@ function mod:OnPostUpdateMyosotis()
         end
 
         log("Myosotis synergy: duplicated " .. tostring(dupeCount) .. " pickup(s) in starting room.")
-    else
-        log("Myosotis synergy: 50% roll did not trigger.")
     end
 end
 
