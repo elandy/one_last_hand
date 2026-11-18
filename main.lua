@@ -1155,6 +1155,63 @@ mod:AddCallback(
     mod.COLLECTIBLE_ONE_LAST_HAND
 )
 
+---------------------------------------------------------------------
+-- PASSIVE: ROOM CLEAR DRAW
+---------------------------------------------------------------------
+
+local CLEAR_DROP_CHANCE = 0.25
+local PILL_CHANCE = 0.33
+
+-- Low-value drops only: upright tarots (1-22).
+-- Excluded: runes, aces, twos, reversed tarots, souls, wildcards.
+local DROP_TAROTS = {}
+for id = 1, 22 do
+    table.insert(DROP_TAROTS, id)
+end
+
+mod.wasRoomClear = true
+
+function mod:OnPostNewRoomClearTracking()
+    mod.wasRoomClear = Game():GetRoom():IsClear()
+end
+mod:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, mod.OnPostNewRoomClearTracking)
+
+function mod:OnPostUpdateRoomClear()
+    local room = Game():GetRoom()
+    local isClear = room:IsClear()
+
+    if isClear and not mod.wasRoomClear then
+        local owner
+        for i = 0, Game():GetNumPlayers() - 1 do
+            local p = Game():GetPlayer(i)
+            if p and p:HasCollectible(mod.COLLECTIBLE_ONE_LAST_HAND, false) then
+                owner = p
+                break
+            end
+        end
+
+        if owner then
+            local rng = owner:GetCollectibleRNG(mod.COLLECTIBLE_ONE_LAST_HAND)
+            if rng:RandomFloat() < CLEAR_DROP_CHANCE then
+                local variant, subType
+                if rng:RandomFloat() < PILL_CHANCE then
+                    variant = PickupVariant.PICKUP_PILL
+                    subType = rng:RandomInt(13) + 1
+                else
+                    variant = PickupVariant.PICKUP_TAROTCARD
+                    subType = DROP_TAROTS[rng:RandomInt(#DROP_TAROTS) + 1]
+                end
+
+                local pos = room:FindFreePickupSpawnPosition(owner.Position, 0, true, false)
+                Isaac.Spawn(EntityType.ENTITY_PICKUP, variant, subType, pos, Vector(0, 0), owner)
+                log("Room clear draw: dropped a pickup.")
+            end
+        end
+    end
+
+    mod.wasRoomClear = isClear
+end
+mod:AddCallback(ModCallbacks.MC_POST_UPDATE, mod.OnPostUpdateRoomClear)
 
 ---------------------------------------------------------------------
 -- SYNERGY: DECK OF CARDS (Two-Way Double Activation)

@@ -46,7 +46,7 @@ D1 (Active Item)
 
 Deck of Cards (Active Item)
 * Two-Way Synergy: Activating *One Last Hand* while holding Deck of Cards has a 50% chance to trigger a double activation (spawning double rewards/choice groups); activating *Deck of Cards* while holding *One Last Hand* has a corresponding 50% chance to double its active effect as well.</description>
-    <version>1.3</version>
+    <version>1.4</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Active Items"/>
